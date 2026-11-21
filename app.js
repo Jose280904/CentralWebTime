@@ -1,229 +1,19 @@
-/*
- * Central Web Time Card
- * Set firebaseConfig when the new Firebase project is ready.
- * For the presentation, set the OAuth web client ID and a dedicated
- * secondary Google Calendar ID owned by the account that will sign in.
- * Enable the Calendar API and authorize this site's exact origin in Google Cloud.
- */
+// Central Web Time Card
 const firebaseConfig = {
   apiKey: "AIzaSyD6Q70FNSff-ZFIVBpejvJCrGAlhXeQldI",
   authDomain: "central-web-time.firebaseapp.com",
   projectId: "central-web-time",
   storageBucket: "central-web-time.firebasestorage.app",
   messagingSenderId: "575122587217",
-  appId: "1:575122587217:web:b00e0dd220455a174ac270",
-  measurementId: "G-1BF49C5YGW"
+  appId: "1:575122587217:web:b00e0dd220455a174ac270"
 };
+const googleCalendarClientId = "575122587217-qov2c70o0or52fipa11m6qv6h91gj224.apps.googleusercontent.com";
 
 document.title = "Central Web Time Card";
-if (firebaseConfig) {
-  startTimecard().catch((error) => {
-    console.error("Unable to start Central Web Time Card:", error);
-    alert("Unable to start Central Web Time Card. Check the Firebase setup.");
-  });
-} else {
-  startCalendarDemo();
-}
-
-function startCalendarDemo() {
-  const panel = document.createElement("main");
-  panel.id = "central-calendar-demo";
-  panel.innerHTML = `
-    <style>
-      body.central-demo { margin: 0; background: #111; color: #eee; }
-      #central-calendar-demo { box-sizing: border-box; max-width: 680px; margin: 4rem auto;
-        padding: 2rem; font: 16px/1.45 system-ui, sans-serif; color: #f4f4f4; }
-      #central-calendar-demo h1 { margin: 0 0 .5rem; color: #fff; }
-      #central-calendar-demo form { display: grid; gap: 1rem; margin: 1.5rem 0;
-        padding: 1.25rem; border: 1px solid #555; border-radius: .75rem; background: #222; }
-      #central-calendar-demo label { display: grid; gap: .35rem; }
-      #central-calendar-demo input, #central-calendar-demo button { box-sizing: border-box;
-        padding: .6rem .75rem; border-radius: .4rem; border: 1px solid #777; font: inherit; }
-      #central-calendar-demo input { width: 100%; background: #161616; color: #fff; color-scheme: dark; }
-      #central-calendar-demo button { background: #eee; color: #111; cursor: pointer; }
-      #central-calendar-demo button:disabled { opacity: .55; cursor: default; }
-      #central-calendar-demo a { color: #fff; }
-      #central-calendar-demo .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-    </style>
-    <h1>Central Web Time Card</h1>
-    <p>Google Calendar demo for one test employee. Shift times use Central Time.</p>
-    <button id="central-connect" type="button" disabled>Connect Google Calendar</button>
-    <form>
-      <label>Shift date <input name="date" type="date" required></label>
-      <label>Start time <input name="start" type="time" value="09:00" required></label>
-      <label>End time <input name="end" type="time" value="13:00" required></label>
-      <div class="actions">
-        <button id="central-save" type="submit" disabled>Publish shift</button>
-        <button id="central-cancel" type="button" disabled>Cancel shift</button>
-      </div>
-    </form>
-    <p id="central-status" role="status"></p>
-    <a id="central-event-link" target="_blank" rel="noopener noreferrer" hidden>Open shift in Google Calendar</a>
-  `;
-  document.body.className = "central-demo";
-  document.body.replaceChildren(panel);
-
-  const connect = panel.querySelector("#central-connect");
-  const save = panel.querySelector("#central-save");
-  const cancel = panel.querySelector("#central-cancel");
-  const status = panel.querySelector("#central-status");
-  const link = panel.querySelector("#central-event-link");
-  const form = panel.querySelector("form");
-  if (!calendarDemo.clientId || !calendarDemo.calendarId || calendarDemo.calendarId === "primary") {
-    status.textContent = "Add a Google OAuth client ID and a dedicated test calendar ID in app.js to enable sync.";
-    return;
-  }
-
-  const scope = "https://www.googleapis.com/auth/calendar.events.owned";
-  const storageKey = `central-timecard:demo:${calendarDemo.clientId}:${calendarDemo.calendarId}`;
-  const collectionUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarDemo.calendarId)}/events`;
-  let shift = JSON.parse(localStorage.getItem(storageKey) || "null");
-  let accessToken = "";
-  let expiresAt = 0;
-  let busy = false;
-
-  if (shift) {
-    form.elements.date.value = shift.date;
-    form.elements.start.value = shift.start;
-    form.elements.end.value = shift.end;
-  }
-
-  function refresh() {
-    const connected = Boolean(accessToken) && Date.now() < expiresAt;
-    connect.disabled = busy;
-    save.disabled = busy || !connected;
-    cancel.disabled = busy || !connected || !shift;
-    save.textContent = shift?.published ? "Save shift changes" : "Publish shift";
-    link.hidden = !shift?.htmlLink;
-    if (shift?.htmlLink) link.href = shift.htmlLink;
-    else link.removeAttribute("href");
-  }
-
-  function remember(nextShift) {
-    if (nextShift) localStorage.setItem(storageKey, JSON.stringify(nextShift));
-    else localStorage.removeItem(storageKey);
-    shift = nextShift;
-  }
-
-  async function request(method, url, data) {
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: data ? JSON.stringify(data) : undefined
-    });
-    if (response.status === 401) {
-      accessToken = "";
-      throw new Error("Google authorization expired. Connect Google Calendar again.");
-    }
-    return response;
-  }
-
-  async function run(action) {
-    if (busy) return;
-    if (!accessToken || Date.now() >= expiresAt) {
-      status.textContent = "Connect Google Calendar again before syncing.";
-      refresh();
-      return;
-    }
-    busy = true;
-    refresh();
-    try {
-      await action();
-    } catch (error) {
-      status.textContent = error.message;
-    } finally {
-      busy = false;
-      refresh();
-    }
-  }
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void run(async () => {
-      const { value: date } = form.elements.date;
-      const { value: start } = form.elements.start;
-      const { value: end } = form.elements.end;
-      if (end <= start) throw new Error("End time must be after start time on the same day.");
-
-      if (!shift) {
-        remember({ id: crypto.randomUUID().replaceAll("-", ""), date, start, end });
-      }
-
-      const data = {
-        summary: "Work shift · Central Web Time Card",
-        start: { dateTime: `${date}T${start}:00`, timeZone: calendarDemo.timeZone },
-        end: { dateTime: `${date}T${end}:00`, timeZone: calendarDemo.timeZone }
-      };
-      const eventUrl = `${collectionUrl}/${shift.id}`;
-      let response;
-      if (shift.published) {
-        response = await request("PATCH", eventUrl, data);
-      } else {
-        response = await request("POST", collectionUrl, { id: shift.id, ...data });
-        if (response.status === 409) response = await request("PATCH", eventUrl, data);
-      }
-      if (!response.ok) throw new Error(`Google Calendar could not save the shift (HTTP ${response.status}).`);
-
-      const calendarEvent = await response.json();
-      remember({ id: shift.id, date, start, end, published: true, htmlLink: calendarEvent.htmlLink });
-      status.textContent = "Shift saved to Google Calendar.";
-    });
-  });
-
-  cancel.addEventListener("click", () => {
-    void run(async () => {
-      if (!shift) return;
-      const response = await request("DELETE", `${collectionUrl}/${shift.id}`);
-      if (!response.ok && response.status !== 410) {
-        throw new Error(`Google Calendar could not confirm removal (HTTP ${response.status}).`);
-      }
-      remember(null);
-      status.textContent = "Shift removed from Google Calendar.";
-    });
-  });
-
-  status.textContent = "Loading Google sign-in…";
-  const script = document.createElement("script");
-  script.src = "https://accounts.google.com/gsi/client";
-  script.onerror = () => { status.textContent = "Google sign-in could not load. Reload to try again."; };
-  script.onload = () => {
-    const oauth = window.google.accounts.oauth2;
-    const client = oauth.initTokenClient({
-      client_id: calendarDemo.clientId,
-      scope,
-      include_granted_scopes: false,
-      callback(response) {
-        busy = false;
-        if (response.error || !oauth.hasGrantedAllScopes(response, scope)) {
-          accessToken = "";
-          status.textContent = "Calendar access was not granted.";
-        } else {
-          accessToken = response.access_token;
-          expiresAt = Date.now() + Number(response.expires_in) * 1000;
-          status.textContent = "Google connected. Use the account that owns the test calendar.";
-        }
-        refresh();
-      },
-      error_callback() {
-        busy = false;
-        status.textContent = "Google sign-in did not finish. Try connecting again.";
-        refresh();
-      }
-    });
-    connect.addEventListener("click", () => {
-      if (busy) return;
-      busy = true;
-      refresh();
-      client.requestAccessToken();
-    });
-    status.textContent = "Connect the Google account that owns the test calendar.";
-    refresh();
-  };
-  document.head.append(script);
-}
+startTimecard().catch((error) => {
+  console.error("Unable to start Central Web Time Card:", error);
+  alert("Unable to start Central Web Time Card. Check the Firebase setup.");
+});
 
 async function startTimecard() {
   const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
@@ -242,6 +32,7 @@ async function startTimecard() {
     collection,
     addDoc,
     getDocs,
+    getDocsFromServer,
     setDoc,
     doc,
     getDoc,
@@ -1025,6 +816,171 @@ async function startTimecard() {
   /* ==================== 8. EMPLOYEE SCHEDULE VIEW ====================
    * Loads the signed-in employee's week and selected-day coworker details.
    */
+  // Calendar access is granted by the employee from the schedule screen.
+  const calendarSyncButton = document.createElement("button");
+  calendarSyncButton.type = "button";
+  calendarSyncButton.className = "outline-btn";
+  calendarSyncButton.textContent = "Sync This Week to Google Calendar";
+  calendarSyncButton.disabled = true;
+  const calendarSyncStatus = document.createElement("p");
+  calendarSyncStatus.className = "muted";
+  calendarSyncStatus.setAttribute("role", "status");
+  myScheduleCalendar.before(calendarSyncButton, calendarSyncStatus);
+
+  const calendarScope = "https://www.googleapis.com/auth/calendar.app.created";
+  const calendarApi = "https://www.googleapis.com/calendar/v3";
+  const scheduleTimeZone = "America/Chicago";
+  let calendarToken = null;
+
+  const googleScript = document.createElement("script");
+  googleScript.src = "https://accounts.google.com/gsi/client";
+  googleScript.async = true;
+  googleScript.onload = () => { calendarSyncButton.disabled = false; };
+  googleScript.onerror = () => {
+    calendarSyncStatus.textContent = "Google sign-in could not load. Reload the page to try again.";
+  };
+  document.head.append(googleScript);
+
+  calendarSyncButton.addEventListener("click", async () => {
+    const user = auth.currentUser;
+    if (!user?.email || calendarSyncButton.disabled) return;
+
+    const week = getStartOfWeek(currentEmployeeWeekStart);
+    const firstDay = formatDateInputValue(week);
+    const nextWeek = formatDateInputValue(addDays(week, 7));
+    const storageKey = `central-web-time:calendar:${googleCalendarClientId}:${user.uid}`;
+    calendarSyncButton.disabled = true;
+    calendarSyncStatus.textContent = `Syncing the week of ${firstDay}…`;
+    try {
+      // Request the popup before awaiting any network work, while the click is active.
+      if (calendarToken?.uid !== user.uid || Date.now() >= calendarToken.expiresAt) {
+        calendarToken = await authorizeCalendar(user.uid);
+      }
+      const sync = () => syncCalendarWeek(user, storageKey, firstDay, nextWeek);
+      const count = navigator.locks
+        ? await navigator.locks.request(storageKey, sync)
+        : await sync();
+      calendarSyncStatus.textContent =
+        `Week of ${firstDay} synced to Central Web Work Schedule (${count} shifts).`;
+    } catch (error) {
+      calendarSyncStatus.textContent = error.message;
+    } finally {
+      calendarSyncButton.disabled = false;
+    }
+  });
+
+  function authorizeCalendar(uid) {
+    return new Promise((resolve, reject) => {
+      const oauth = window.google.accounts.oauth2;
+      const client = oauth.initTokenClient({
+        client_id: googleCalendarClientId,
+        scope: calendarScope,
+        include_granted_scopes: false,
+        callback(response) {
+          if (response.error || !oauth.hasGrantedAllScopes(response, calendarScope)) {
+            reject(new Error("Google Calendar access was not granted."));
+            return;
+          }
+          resolve({ uid, token: response.access_token, expiresAt: Date.now() + response.expires_in * 1000 });
+        },
+        error_callback() {
+          reject(new Error("Google sign-in did not finish. Allow popups and try again."));
+        }
+      });
+      client.requestAccessToken();
+    });
+  }
+
+  async function syncCalendarWeek(user, storageKey, firstDay, nextWeek) {
+    const shifts = (await getSchedulesForEmployee(user.email.trim().toLowerCase(), getDocsFromServer))
+      .filter(shift => shift.date >= firstDay && shift.date < nextWeek);
+    const desired = new Map(shifts.map(shift => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(shift.date) ||
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(shift.startTime) ||
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(shift.endTime) ||
+          shift.endTime <= shift.startTime) {
+        throw new Error("A shift has invalid dates or times. Correct it in Schedule Builder and try again.");
+      }
+      return [shift.id, {
+        summary: "Work shift",
+        location: shift.location || "",
+        start: { dateTime: `${shift.date}T${shift.startTime}:00`, timeZone: scheduleTimeZone },
+        end: { dateTime: `${shift.date}T${shift.endTime}:00`, timeZone: scheduleTimeZone },
+        extendedProperties: { private: { cwtEmployee: user.uid, cwtWeek: firstDay, cwtShift: shift.id } }
+      }];
+    }));
+
+    let calendarId = localStorage.getItem(storageKey);
+    if (!calendarId) {
+      const calendar = await calendarRequest(user.uid, "/calendars", "POST", {
+        summary: "Central Web Work Schedule",
+        timeZone: scheduleTimeZone
+      });
+      calendarId = calendar.id;
+      localStorage.setItem(storageKey, calendarId);
+    }
+
+    const eventsPath = `/calendars/${encodeURIComponent(calendarId)}/events`;
+    const existing = [];
+    let pageToken;
+    do {
+      const query = new URLSearchParams({ showDeleted: "false" });
+      // Recheck both tags on returned events before any mutation.
+      query.append("privateExtendedProperty", `cwtWeek=${firstDay}`);
+      if (pageToken) query.set("pageToken", pageToken);
+      const page = await calendarRequest(user.uid, `${eventsPath}?${query}`);
+      for (const event of page.items || []) {
+        const tags = event.extendedProperties?.private;
+        if (tags?.cwtEmployee === user.uid && tags.cwtWeek === firstDay && tags.cwtShift) {
+          existing.push(event);
+        }
+      }
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+
+    const handled = new Set();
+    const stale = [];
+    for (const event of existing) {
+      const shiftId = event.extendedProperties.private.cwtShift;
+      if (!desired.has(shiftId) || handled.has(shiftId)) {
+        stale.push(event);
+        continue;
+      }
+      await calendarRequest(user.uid, `${eventsPath}/${encodeURIComponent(event.id)}`, "PATCH", desired.get(shiftId));
+      handled.add(shiftId);
+    }
+
+    for (const [shiftId, event] of desired) {
+      if (!handled.has(shiftId)) await calendarRequest(user.uid, eventsPath, "POST", event);
+    }
+    for (const event of stale) {
+      await calendarRequest(user.uid, `${eventsPath}/${encodeURIComponent(event.id)}`, "DELETE");
+    }
+    return shifts.length;
+  }
+
+  async function calendarRequest(uid, path, method = "GET", body) {
+    if (auth.currentUser?.uid !== uid || calendarToken?.uid !== uid) {
+      throw new Error("Your timecard session changed. Sign in and try again.");
+    }
+    const response = await fetch(calendarApi + path, {
+      method,
+      headers: { Authorization: `Bearer ${calendarToken.token}`, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (response.status === 401) {
+      calendarToken = null;
+      throw new Error("Google Calendar access expired. Click Sync again to reconnect.");
+    }
+    if (method === "DELETE" && (response.status === 404 || response.status === 410)) return;
+    if (method === "GET" && (response.status === 403 || response.status === 404)) {
+      calendarToken = null;
+      throw new Error("Could not open your work calendar. Sync again with the Google account you originally used.");
+    }
+    if (!response.ok) throw new Error(`Google Calendar sync stopped (HTTP ${response.status}). Try syncing again.`);
+    if (response.status !== 204) return response.json();
+  }
+
   async function loadMyWeeklySchedule() {
     const user = auth.currentUser;
     if (!user) return;
@@ -1187,9 +1143,9 @@ async function startTimecard() {
     return schedules;
   }
 
-  async function getSchedulesForEmployee(email) {
+  async function getSchedulesForEmployee(email, readSchedules = getDocs) {
     const q = query(collection(db, "schedules"), orderBy("scheduleDateTime", "asc"));
-    const snapshot = await getDocs(q);
+    const snapshot = await readSchedules(q);
     const schedules = [];
 
     snapshot.forEach((docSnap) => {
@@ -2914,6 +2870,8 @@ async function startTimecard() {
       if (currentUserAccess.canManageTimeOff) await loadPendingTimeOffRequests();
       if (currentUserAccess.canViewSignatures) await loadWeeklySignatures();
     } else {
+      calendarToken = null;
+      calendarSyncStatus.textContent = "";
       authBox.classList.remove("hidden");
       signupBox.classList.add("hidden");
       appPages.classList.add("hidden");
